@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "camada-semantica": {
+      "type": "stdio",
+      "command": "mcp/.venv/bin/python",
+      "args": ["mcp/server.py"],
+      "env": { "CUBE_URL": "${CUBE_URL:-http://localhost:4000}" }
+    }
+  }
+}

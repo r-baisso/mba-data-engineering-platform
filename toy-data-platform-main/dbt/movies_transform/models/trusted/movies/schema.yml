@@ -1,0 +1,39 @@
+version: 2
+
+sources:
+  - name: raw
+    database: raw  
+    schema: raw_movies  
+    tables:
+      - name: netflix_titles
+      - name: meta_critic
+      - name: imdb_top_1000
+
+models:
+  - name: netflix_titles
+    description: "tabela de filmes"
+    columns:
+      - name: show_id
+        tests:
+          - unique
+          - not_null
+      - name: date_added
+        tests:
+          # 10 títulos não têm data na fonte; uma conversão quebrada zera a coluna inteira
+          - not_null:
+              config:
+                warn_if: ">100"
+                error_if: ">100"
+
+  - name: imdb_top_1000
+    description: "Top 1000 filmes do IMDB padronizados no grão original da fonte"
+    columns:
+      - name: title
+        tests:
+          - not_null
+      - name: imdb_rating
+        tests:
+          - not_null
+      - name: imdb_votes
+        tests:
+          - not_null

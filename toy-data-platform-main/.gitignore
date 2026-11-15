@@ -1,0 +1,13 @@
+*-data/
+.cubestore/
+venv
+.venv/
+__pycache__
+target/
+logs/
+.user.yml
+
+# artefatos de trabalho (spec, issues, progresso) — não versionados
+.scratch/
+docs/specs/
+progress.txt

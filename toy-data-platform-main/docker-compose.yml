@@ -1,0 +1,296 @@
+x-airflow-common:
+  &airflow-common
+  build:
+    context: ./airflow
+    dockerfile: airflow.Dockerfile
+  env_file: airflow/.env
+  environment:
+    - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+    - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:postgres@postgres:5432/airflow
+    - AIRFLOW__CORE__FERNET_KEY=FB0o_zt4e3Ziq3LdUUO7F2Z95cvFFx16hU8jTeR1ASM=
+    - AIRFLOW__CORE__LOAD_EXAMPLES=False
+    - AIRFLOW__CORE__LOGGING_LEVEL=INFO
+    - AIRFLOW__API_AUTH__JWT_SECRET=my_jwt_secret
+    - AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS=admin:admin
+    - AIRFLOW__CORE__EXECUTION_API_SERVER_URL=http://airflow-webserver:8080/execution/
+    - AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS=True
+    - AIRFLOW__CORE__AUTH_MANAGER=airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - airflow-logs:/opt/airflow/logs
+    - airflow-plugins:/opt/airflow/plugins
+    - airflow-config:/opt/airlfow/airflow.cfg
+    - /var/run/docker.sock:/var/run/docker.sock
+  depends_on:
+    - postgres
+  group_add:
+      - "0"
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=airflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - airflow-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
+
+
+  airflow-init:
+    << : *airflow-common
+    container_name: airflow_init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+        echo "Initing Airflow"
+        airflow db migrate
+    restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  airflow-webserver:
+    << : *airflow-common
+    command: airflow api-server
+    ports:
+      - 8080:8080
+    container_name: airflow_webserver
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    << : *airflow-common
+    command: airflow scheduler
+    container_name: airflow_scheduler
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    << : *airflow-common
+    command: airflow dag-processor
+    container_name: airflow_dag_processor
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  minio:
+    # MinIO removed its Docker Hub images; use Chainguard's public build
+    # (same MinIO server + mc client). Pinned to the `latest` index digest.
+    image: chainguard/minio@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: [ "server", "--console-address", ":9001", "/data" ]
+    environment:
+      MINIO_ROOT_USER: root
+      MINIO_ROOT_PASSWORD: rootrootroot
+    volumes:
+      - minio-data:/data
+
+  createbuckets:
+    image: chainguard/minio@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
+    depends_on:
+      - minio
+    restart: on-failure
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      /usr/bin/mc alias set dockerminio http://minio:9000 root rootrootroot;
+      /usr/bin/mc mb dockerminio/raw;
+      /usr/bin/mc mb dockerminio/trusted;
+      /usr/bin/mc mb dockerminio/refined;
+      exit 0;
+      "
+
+
+  lakekeeper:
+    image: &lakekeeper-image ${LAKEKEEPER__SERVER_IMAGE:-quay.io/lakekeeper/catalog:v0.12.4}
+    pull_policy: &lakekeeper-pull-policy always
+    environment: &lakekeeper-environment
+      - LAKEKEEPER__PG_ENCRYPTION_KEY=This-is-NOT-Secure!
+      - LAKEKEEPER__PG_DATABASE_URL_READ=postgresql://postgres:postgres@lakekeeper_db:5432/postgres
+      - LAKEKEEPER__PG_DATABASE_URL_WRITE=postgresql://postgres:postgres@lakekeeper_db:5432/postgres
+      - LAKEKEEPER__AUTHZ_BACKEND=allowall
+    command: [ "serve" ]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "8181:8181"
+
+  migrate:
+    image: *lakekeeper-image
+    pull_policy: *lakekeeper-pull-policy
+    environment: *lakekeeper-environment
+    restart: "no"
+    command: [ "migrate" ]
+    depends_on:
+      lakekeeper_db:
+        condition: service_healthy
+
+  lakekeeper_db:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -p 5432 -d postgres" ]
+      interval: 2s
+      timeout: 10s
+      retries: 2
+      start_period: 10s
+    ports:
+      - "5433:5432"
+    volumes:
+      - lakekeeper-data:/var/lib/postgresql/data
+
+  trino:
+    ports:
+      - "8081:8080"
+    image: "trinodb/trino:471"
+    # The image's jvm.config takes 80% of the RAM it sees as heap; without a
+    # limit that is 80% of the whole Docker VM.
+    mem_limit: 2g
+    env_file: trino/.env
+    volumes:
+      - ./trino/catalog:/etc/trino/catalog
+
+  cube:
+    image: cubejs/cube:v1.8.6
+    env_file: cube/.env
+    ports:
+      - "4000:4000"      # API REST /v1/* e Playground
+      - "15432:15432"    # SQL API (protocolo Postgres)
+    volumes:
+      - ./cube:/cube/conf
+    healthcheck:
+      # /cubejs-api/v1/meta só responde 200 depois que o modelo YAML compila.
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:4000/cubejs-api/v1/meta').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    depends_on:
+      - trino
+
+  superset:
+    init: true
+    image: superset-semantico
+    build:
+      context: ./superset
+      dockerfile: Dockerfile
+    volumes:
+      - ./superset/superset-data:/app/superset_home
+      - ./superset/setup.sh:/app/setup.sh
+    entrypoint:
+      - bash
+      - setup.sh
+    ports:
+      - '8088:8088'
+    depends_on:
+      superset-postgres:
+        condition: service_healthy
+
+  # Registra o Cube como banco do Superset (protocolo Postgres) e publica o
+  # dashboard de exemplo. Roda uma vez após o Superset subir; é idempotente.
+  # As credenciais da SQL API vêm de cube/.env — uma verdade só.
+  superset-bootstrap:
+    image: superset-semantico
+    build:
+      context: ./superset
+      dockerfile: Dockerfile
+    entrypoint: [ "python", "/app/bootstrap_semantic_layer.py" ]
+    env_file: cube/.env
+    environment:
+      - SUPERSET_URL=http://superset:8088
+    restart: "no"
+    depends_on:
+      superset:
+        condition: service_healthy
+      cube:
+        condition: service_healthy
+
+  superset-postgres:
+    init: true
+    image: postgres:16
+    volumes:
+      - superset-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=superset
+      - POSTGRES_USER=superset
+      - POSTGRES_PASSWORD=secretsecret
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U superset -d superset" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  bootstrap-lakekeeper:
+    image: curlimages/curl
+    depends_on:
+      - lakekeeper
+    restart: "no"
+    command:
+      - -w
+      - "%{http_code}"
+      - "-X"
+      - "POST"
+      - "-v"
+      - "http://lakekeeper:8181/management/v1/bootstrap"
+      - "-H"
+      - "Content-Type: application/json"
+      - "--data"
+      - '{"accept-terms-of-use": true}'
+      - "-o"
+      - "/dev/null"
+
+  create-warehouse:
+    image: curlimages/curl
+    depends_on:
+      bootstrap-lakekeeper:
+        condition: service_completed_successfully
+      createbuckets:
+        condition: service_completed_successfully
+    restart: "no"
+    entrypoint: [ "sh", "/home/curl_user/create_warehouse.sh" ]
+    volumes:
+      - ./lakekeeper/raw.json:/home/curl_user/raw.json
+      - ./lakekeeper/trusted.json:/home/curl_user/trusted.json
+      - ./lakekeeper/refined.json:/home/curl_user/refined.json
+      - ./lakekeeper/create_warehouse.sh:/home/curl_user/create_warehouse.sh
+volumes:
+  minio-data:
+  lakekeeper-data:
+  superset-data:
+  airflow-data:
+  airflow-logs:
+  airflow-plugins:
+  airflow-config:
+
+networks:
+  default:
+    name: platform-net

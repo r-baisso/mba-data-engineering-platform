@@ -1,0 +1,148 @@
+version: 2
+
+models:
+  - name: dim_year
+    description: "Dimensão de tempo: um ano de lançamento (`year_key`) por linha."
+    columns:
+      - name: year_key
+        description: "Ano de lançamento do título (chave natural)."
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_type
+    description: "Dimensão de tipo de título: `Movie` ou `TV Show`."
+    columns:
+      - name: type_key
+        description: "Tipo do título (chave natural)."
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_genre
+    description: >
+      Dimensão de gênero: um gênero (`genre_key`) por linha, derivado da ponte
+      título-gênero. Resolve o atributo multi-valor `listed_in` da origem.
+    columns:
+      - name: genre_key
+        description: "Gênero do título (chave natural)."
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_country
+    description: >
+      Dimensão de país: um país (`country_key`) por linha, derivado da ponte
+      título-país. Resolve o atributo multi-valor `country` da origem.
+    columns:
+      - name: country_key
+        description: "País de produção do título (chave natural)."
+        tests:
+          - unique
+          - not_null
+
+  - name: bridge_title_genre
+    description: >
+      Ponte título ↔ gênero, uma linha por par (título, gênero). Um título com N
+      gêneros aparece N vezes; fatiar uma medida por gênero filtra pela ponte em vez
+      de agregar a lista da origem, então nenhum título é contado duas vezes pelo mesmo gênero.
+    columns:
+      - name: title_genre_key
+        description: "Chave do par título-gênero (`title_key|genre_key`)."
+        tests:
+          - unique
+          - not_null
+      - name: title_key
+        description: "Título, referência a `fct_titles`."
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fct_titles')
+                field: title_key
+      - name: genre_key
+        description: "Gênero, referência a `dim_genre`."
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_genre')
+                field: genre_key
+
+  - name: bridge_title_country
+    description: >
+      Ponte título ↔ país, uma linha por par (título, país). Um título produzido em N
+      países aparece N vezes. Títulos sem país na origem não entram na ponte.
+    columns:
+      - name: title_country_key
+        description: "Chave do par título-país (`title_key|country_key`)."
+        tests:
+          - unique
+          - not_null
+      - name: title_key
+        description: "Título, referência a `fct_titles`."
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fct_titles')
+                field: title_key
+      - name: country_key
+        description: "País, referência a `dim_country`."
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_country')
+                field: country_key
+
+  - name: fct_titles
+    description: >
+      Fato de títulos no grão de um título (`title_key`). Medidas: nota da crítica
+      (`rating`), total de votos (`votes`) e duração em minutos para filmes
+      (`duration_minutes`). Cada título aparece uma única vez, então a contagem de
+      títulos é estável ao fatiar por qualquer dimensão.
+    columns:
+      - name: title_key
+        description: "Chave natural do título, normalizado (minúsculas, sem espaços nas bordas)."
+        tests:
+          - unique
+          - not_null
+      - name: title
+        description: "Título para exibição, como veio do Netflix."
+        tests:
+          - not_null
+      - name: year_key
+        description: "Ano de lançamento, referência a `dim_year`."
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_year')
+                field: year_key
+      - name: type_key
+        description: "Tipo do título, referência a `dim_type`."
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_type')
+                field: type_key
+      - name: rating
+        description: "Nota da crítica (medida)."
+      - name: votes
+        description: "Total de pessoas que votaram (medida)."
+      - name: duration_minutes
+        description: "Duração em minutos para filmes; nulo para TV Show (medida)."
+      - name: imdb_rating
+        description: "Nota do público no IMDB Top 1000; nulo quando o título não está no Top 1000 (medida)."
+      - name: imdb_votes
+        description: "Total de votos no IMDB Top 1000; nulo quando não está no Top 1000 (medida)."
+      - name: is_imdb_top_1000
+        description: "Indicador (1 ou 0) se o título está presente no dataset IMDB Top 1000."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+                quote: false

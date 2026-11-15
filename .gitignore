@@ -1,0 +1,21 @@
+# Ambient & runtime artifacts
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Data platform local storage & build artifacts
+*-data/
+.cubestore/
+target/
+logs/
+.user.yml
+data/*.zip
+docs/DE-Aula*.pdf
+docs/aula-*.pdf
+.agents/skills/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
