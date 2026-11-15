@@ -4,7 +4,8 @@
 - **Disciplina:** Data Engineering & Architecture
 - **Aluno:** Renan Baisso
 - **Professor:** Lorran Santos Rodrigues
-- **Data:** 14/11/2026
+- **Data:** 15/11/2026
+- **Repositório:** [https://github.com/r-baisso/mba-data-engineering-platform](https://github.com/r-baisso/mba-data-engineering-platform)
 
 ---
 
