@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Arquitetura da Solução — Lakehouse MBA Data Engineering</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --surface-2: #273549;
+      --border: #334155;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --ingest: #0ea5e9;
+      --orch: #8b5cf6;
+      --dbt: #f97316;
+      --storage: #14b8a6;
+      --cube: #ec4899;
+      --consume: #22c55e;
+      --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+      background: radial-gradient(circle at top right, #172554 0%, var(--bg) 45%);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    header {
+      padding: 20px 24px 16px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(8px);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+
+    .header-top {
+      max-width: 1440px;
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.15rem, 2vw, 1.55rem);
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .subtitle {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .meta-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .badge {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 4px 12px;
+      font-size: 0.78rem;
+      color: var(--text);
+      text-decoration: none;
+    }
+    .badge strong { color: var(--accent); }
+    .badge.link:hover { border-color: var(--accent); }
+
+    .controls {
+      max-width: 1440px;
+      margin: 14px auto 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .filter-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .filter-btn {
+      background: var(--surface);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .filter-btn:hover { color: var(--text); border-color: var(--accent); }
+    .filter-btn.active {
+      background: rgba(56, 189, 248, 0.16);
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .search-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 7px 12px;
+      font-size: 0.85rem;
+      min-width: 240px;
+      outline: none;
+    }
+    .search-box:focus { border-color: var(--accent); }
+
+    main {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 20px 24px 40px;
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .pipeline-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(180px, 1fr));
+      gap: 14px;
+      position: relative;
+    }
+
+    .layer {
+      background: rgba(30, 41, 59, 0.72);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      transition: opacity 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+    }
+
+    .layer.dimmed { opacity: 0.28; }
+    .layer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+
+    .layer-title {
+      font-size: 0.82rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .layer-step {
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-weight: 700;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .node {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      border-radius: 10px;
+      padding: 11px 12px;
+      cursor: pointer;
+      transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+      text-align: left;
+      width: 100%;
+      color: inherit;
+    }
+
+    .node:hover {
+      transform: translateY(-2px);
+      border-color: var(--accent);
+      box-shadow: var(--shadow);
+    }
+
+    .node.selected {
+      border-color: #fff;
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.5), var(--shadow);
+    }
+
+    .node.hidden-search { display: none; }
+
+    .node-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .node-name {
+      font-size: 0.92rem;
+      font-weight: 700;
+    }
+
+    .node-tag {
+      font-size: 0.68rem;
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: rgba(15, 23, 42, 0.7);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .node-desc {
+      font-size: 0.79rem;
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .c-ingest { border-left-color: var(--ingest); }
+    .c-orch { border-left-color: var(--orch); }
+    .c-storage { border-left-color: var(--storage); }
+    .c-dbt { border-left-color: var(--dbt); }
+    .c-cube { border-left-color: var(--cube); }
+    .c-consume { border-left-color: var(--consume); }
+
+    .orch-banner {
+      grid-column: 1 / -1;
+      background: linear-gradient(90deg, rgba(139, 92, 246, 0.18), rgba(56, 189, 248, 0.12));
+      border: 1px solid rgba(139, 92, 246, 0.45);
+      border-radius: 12px;
+      padding: 12px 16px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      cursor: pointer;
+    }
+    .orch-banner:hover { border-color: #a78bfa; }
+
+    .inspector {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      position: sticky;
+      top: 125px;
+      box-shadow: var(--shadow);
+    }
+
+    .inspector h2 {
+      margin: 0 0 6px;
+      font-size: 1.08rem;
+    }
+
+    .inspector-layer {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+      font-weight: 700;
+      margin-bottom: 10px;
+      display: block;
+    }
+
+    .inspector p {
+      font-size: 0.88rem;
+      color: #cbd5e1;
+      margin: 0 0 14px;
+    }
+
+    .detail-block {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+    }
+
+    .detail-block h3 {
+      margin: 0 0 6px;
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+    }
+
+    .detail-block ul {
+      margin: 0;
+      padding-left: 16px;
+      font-size: 0.83rem;
+    }
+
+    .detail-block li { margin-bottom: 4px; }
+    code {
+      background: rgba(56, 189, 248, 0.12);
+      color: #7dd3fc;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 0.8em;
+      font-family: Consolas, "Cascadia Code", monospace;
+    }
+
+    .kpis {
+      max-width: 1440px;
+      margin: 18px auto 0;
+      padding: 0 24px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .kpi {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 16px;
+    }
+    .kpi-val {
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: var(--accent);
+    }
+    .kpi-lbl {
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    @media (max-width: 1200px) {
+      main { grid-template-columns: 1fr; }
+      .inspector { position: static; }
+      .pipeline-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 680px) {
+      header, main, .kpis { padding-left: 14px; padding-right: 14px; }
+      .pipeline-grid { grid-template-columns: 1fr; }
+      .kpis { grid-template-columns: repeat(2, 1fr); }
+      .search-box { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-top">
+      <div>
+        <h1>Arquitetura da Solução — Lakehouse End-to-End</h1>
+        <p class="subtitle">MBA em Arquitetura de Sistemas Digitais · Data Engineering &amp; Architecture · Clique em qualquer componente para inspecionar</p>
+      </div>
+      <div class="meta-badges">
+        <span class="badge"><strong>Aluno:</strong> Renan Baisso</span>
+        <span class="badge"><strong>Professor:</strong> Lorran Santos Rodrigues</span>
+        <a class="badge link" href="https://github.com/r-baisso/mba-data-engineering-platform" target="_blank" rel="noopener">
+          <strong>GitHub:</strong> r-baisso/mba-data-engineering-platform ↗
+        </a>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="filter-group" id="filters">
+        <button class="filter-btn active" data-filter="all">Visão Geral</button>
+        <button class="filter-btn" data-filter="ingest">1. Ingestão (dlt)</button>
+        <button class="filter-btn" data-filter="orch">2. Orquestração (Airflow)</button>
+        <button class="filter-btn" data-filter="dbt">3. Transformação (dbt + Iceberg)</button>
+        <button class="filter-btn" data-filter="cube">4. Camada Semântica (Cube)</button>
+        <button class="filter-btn" data-filter="consume">5. Consumo (Superset &amp; MCP)</button>
+      </div>
+      <input class="search-box" id="search" type="search" placeholder="Filtrar tabela, modelo, métrica..." />
+    </div>
+  </header>
+
+  <section class="kpis">
+    <div class="kpi">
+      <div class="kpi-val">1.813</div>
+      <div class="kpi-lbl">Títulos únicos em <code>fct_titles</code> (grão 1:1)</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val">134</div>
+      <div class="kpi-lbl">Títulos Netflix no Top 1000 IMDB (<code>Dramas: 89</code>)</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val">52 / 52</div>
+      <div class="kpi-lbl">Modelos e testes aprovados no <code>dbt build</code></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val">7,97 vs. 6,63</div>
+      <div class="kpi-lbl">Nota média IMDB (Top 1000) vs. Crítica (global)</div>
+    </div>
+  </section>
+
+  <main>
+    <section class="pipeline-grid" id="grid">
+      <div class="orch-banner" data-layer="orch" data-id="airflow">
+        <div>
+          <strong>Orquestração End-to-End · Apache Airflow 3 (<code>extract_movies</code>)</strong>
+          <div class="node-desc">3 tarefas <code>dlt</code> em paralelo (<code>max_active_tasks=2</code>) &gt;&gt; <code>transform-dbt-build</code> via <code>DockerOperator</code></div>
+        </div>
+        <span class="node-tag">:8080 · DAG extract_movies</span>
+      </div>
+
+      <!-- Camada 1: Fontes & Ingestão -->
+      <div class="layer" data-layer="ingest">
+        <div class="layer-header">
+          <span class="layer-title">Fontes &amp; Ingestão</span>
+          <span class="layer-step">1</span>
+        </div>
+        <button class="node c-ingest" data-id="csv-sources">
+          <div class="node-head">
+            <span class="node-name">Datasets CSV</span>
+            <span class="node-tag">dlt/data/</span>
+          </div>
+          <p class="node-desc"><code>netflix_titles.csv</code>, <code>meta_critic.csv</code> e <code>imdb_top_1000.csv</code></p>
+        </button>
+        <button class="node c-ingest" data-id="dlt-pipeline">
+          <div class="node-head">
+            <span class="node-name">dlt Pipeline</span>
+            <span class="node-tag">Python</span>
+          </div>
+          <p class="node-desc"><code>filesystem_pipeline.py</code> ingere CSVs para Iceberg (<code>replace</code>).</p>
+        </button>
+      </div>
+
+      <!-- Camada 2: Storage & Raw/Trusted -->
+      <div class="layer" data-layer="dbt">
+        <div class="layer-header">
+          <span class="layer-title">Lakehouse &amp; Trusted</span>
+          <span class="layer-step">2</span>
+        </div>
+        <button class="node c-storage" data-id="minio-lakekeeper">
+          <div class="node-head">
+            <span class="node-name">MinIO + Lakekeeper</span>
+            <span class="node-tag">Iceberg REST</span>
+          </div>
+          <p class="node-desc">Object storage S3 + catálogo Iceberg (<code>raw</code>, <code>trusted</code>, <code>refined</code>).</p>
+        </button>
+        <button class="node c-dbt" data-id="dbt-trusted">
+          <div class="node-head">
+            <span class="node-name">dbt Trusted</span>
+            <span class="node-tag">Trino 471</span>
+          </div>
+          <p class="node-desc"><code>netflix_titles</code>, <code>meta_critic</code> e novo modelo <code>imdb_top_1000</code> (1000 linhas).</p>
+        </button>
+      </div>
+
+      <!-- Camada 3: Refined & Qualidade -->
+      <div class="layer" data-layer="dbt">
+        <div class="layer-header">
+          <span class="layer-title">Refined &amp; Qualidade</span>
+          <span class="layer-step">3</span>
+        </div>
+        <button class="node c-dbt" data-id="dbt-refined">
+          <div class="node-head">
+            <span class="node-name">Star Schema (fct_titles)</span>
+            <span class="node-tag">1.813 linhas</span>
+          </div>
+          <p class="node-desc"><code>fct_titles</code> + <code>dim_*</code> + <code>bridge_title_genre</code> / <code>country</code>.</p>
+        </button>
+        <button class="node c-dbt" data-id="dbt-tests">
+          <div class="node-head">
+            <span class="node-name">Testes de Qualidade</span>
+            <span class="node-tag">52 PASS</span>
+          </div>
+          <p class="node-desc"><code>unique</code>, <code>not_null</code>, <code>assert_fct_titles_grain</code> e <code>imdb_rating_range</code>.</p>
+        </button>
+      </div>
+
+      <!-- Camada 4: Camada Semântica -->
+      <div class="layer" data-layer="cube">
+        <div class="layer-header">
+          <span class="layer-title">Camada Semântica</span>
+          <span class="layer-step">4</span>
+        </div>
+        <button class="node c-cube" data-id="cube-model">
+          <div class="node-head">
+            <span class="node-name">Cube (titles_overview)</span>
+            <span class="node-tag">:4000 / :15432</span>
+          </div>
+          <p class="node-desc">Métricas governadas: <code>count_imdb_top_1000</code>, <code>avg_imdb_rating</code>, <code>avg_rating</code>.</p>
+        </button>
+      </div>
+
+      <!-- Camada 5: Consumo -->
+      <div class="layer" data-layer="consume">
+        <div class="layer-header">
+          <span class="layer-title">Consumo BI &amp; IA</span>
+          <span class="layer-step">5</span>
+        </div>
+        <button class="node c-consume" data-id="superset">
+          <div class="node-head">
+            <span class="node-name">Apache Superset 6.1</span>
+            <span class="node-tag">:8088</span>
+          </div>
+          <p class="node-desc">Dashboard 2x2: Top 10 Gêneros IMDB Top 1000 + IMDB vs. Crítica (0–10).</p>
+        </button>
+        <button class="node c-consume" data-id="mcp-agent">
+          <div class="node-head">
+            <span class="node-name">Agente MCP</span>
+            <span class="node-tag">9/9 testes OK</span>
+          </div>
+          <p class="node-desc"><code>mcp/server.py</code> + <code>demo.py</code> consultam o Cube com paridade total.</p>
+        </button>
+      </div>
+    </section>
+
+    <aside class="inspector" id="inspector">
+      <span class="inspector-layer" id="ins-layer">Visão Geral</span>
+      <h2 id="ins-title">Selecione um componente</h2>
+      <p id="ins-desc">Clique em qualquer bloco do diagrama ao lado para explorar tabelas, métricas, arquivos do repositório, portas e validações executadas.</p>
+      <div class="detail-block">
+        <h3>Pergunta de Negócio</h3>
+        <ul>
+          <li>Quais gêneros da Netflix têm mais títulos no Top 1000 do IMDB?</li>
+          <li>Como a nota do público (IMDB) se compara à nota da crítica (Metacritic)?</li>
+        </ul>
+      </div>
+      <div class="detail-block">
+        <h3>Resultado Principal</h3>
+        <ul>
+          <li><strong>Dramas</strong> lidera com <code>89</code> títulos no Top 1000 (IMDB <code>7,952</code> vs. Crítica <code>6,773</code>).</li>
+          <li>Seguido por <strong>Action &amp; Adventure</strong> (<code>34</code>) e <strong>Independent Movies</strong> (<code>34</code>).</li>
+        </ul>
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    const DETAILS = {
+      "csv-sources": {
+        layer: "1. Fontes & Ingestão",
+        title: "Datasets CSV (Fontes)",
+        desc: "Arquivos de entrada versionados em dlt/data/ que alimentam o Lakehouse.",
+        blocks: [
+          { title: "Arquivos", items: ["<code>netflix_titles.csv</code> — catálogo Netflix (filmes, séries, gêneros, países)", "<code>meta_critic.csv</code> — notas da crítica convertidas para escala 0–10", "<code>imdb_top_1000.csv</code> — 1.000 títulos mais bem avaliados no IMDB"] }
+        ]
+      },
+      "dlt-pipeline": {
+        layer: "1. Fontes & Ingestão",
+        title: "Pipeline dlt (filesystem_pipeline.py)",
+        desc: "Extrai os CSVs e escreve tabelas Iceberg na camada raw de forma idempotente (write_disposition='replace').",
+        blocks: [
+          { title: "Artefatos", items: ["<code>toy-data-platform-main/dlt/filesystem_pipeline.py</code>", "<code>toy-data-platform-main/dlt/Dockerfile</code>"] },
+          { title: "Saída", items: ["<code>raw.raw_movies.netflix_titles</code>", "<code>raw.raw_movies.meta_critic</code>", "<code>raw.raw_movies.imdb_top_1000</code>"] }
+        ]
+      },
+      "airflow": {
+        layer: "2. Orquestração",
+        title: "Apache Airflow 3 — DAG extract_movies",
+        desc: "Orquestra o pipeline completo via DockerOperator, com ingestões paralelas seguidas da transformação dbt.",
+        blocks: [
+          { title: "Fluxo da DAG", items: ["<code>ingestion-movies-netflix_titles</code>, <code>meta_critic</code> e <code>imdb_top_1000</code> (paralelo, <code>max_active_tasks=2</code>)", "<code>&gt;&gt; transform-dbt-build</code> (<code>DBT_PARTIAL_PARSE=false</code>)"] },
+          { title: "Arquivo & UI", items: ["<code>toy-data-platform-main/airflow/dags/extract_movies.py</code>", "Porta local: <code>http://localhost:8080</code>"] }
+        ]
+      },
+      "minio-lakekeeper": {
+        layer: "2. Lakehouse Storage",
+        title: "MinIO + Lakekeeper (Apache Iceberg)",
+        desc: "Armazenamento S3 local com MinIO e catálogo Iceberg REST gerenciado pelo Lakekeeper para os três catálogos.",
+        blocks: [
+          { title: "Catálogos", items: ["<code>raw</code> — dados ingeridos pelo dlt", "<code>trusted</code> — dados limpos e tipados", "<code>refined</code> — modelo dimensional Star Schema"] }
+        ]
+      },
+      "dbt-trusted": {
+        layer: "3. Transformação (dbt + Trino)",
+        title: "Camada Trusted (dbt)",
+        desc: "Limpeza, normalização de títulos (normalize_column), tipagem e deduplicação sobre Trino 471.",
+        blocks: [
+          { title: "Modelos", items: ["<code>models/trusted/movies/netflix_titles.sql</code>", "<code>models/trusted/movies/meta_critic.sql</code>", "<code>models/trusted/movies/imdb_top_1000.sql</code> (1.000 linhas)"] }
+        ]
+      },
+      "dbt-refined": {
+        layer: "3. Transformação (dbt + Trino)",
+        title: "Camada Refined — Star Schema",
+        desc: "Tabela fato no grão 1:1 por título (title_key) enriquecida com imdb_rating, imdb_votes e is_imdb_top_1000 via LEFT JOIN determinístico.",
+        blocks: [
+          { title: "Modelos", items: ["<code>fct_titles</code> (<code>1.813</code> linhas, <code>134</code> matches IMDB Top 1000)", "<code>dim_type</code>, <code>dim_year</code>, <code>dim_genre</code>, <code>dim_country</code>", "<code>bridge_title_genre</code> e <code>bridge_title_country</code> (N:N)"] }
+        ]
+      },
+      "dbt-tests": {
+        layer: "3. Qualidade de Dados",
+        title: "Testes Automatizados (dbt build)",
+        desc: "52 execuções aprovadas (PASS=52, ERROR=0) garantindo integridade referencial, grão e domínio de notas.",
+        blocks: [
+          { title: "Testes Principais", items: ["<code>assert_fct_titles_grain.sql</code> — valida 1:1 com netflix_titles", "<code>assert_fct_titles_imdb_rating_range.sql</code> — valida faixa 0–10", "<code>unique</code>, <code>not_null</code>, <code>accepted_values</code> em <code>schema.yml</code>"] }
+        ]
+      },
+      "cube-model": {
+        layer: "4. Camada Semântica",
+        title: "Cube v1.8.6 (titles_overview)",
+        desc: "Centraliza métricas e dimensões governadas, evitando fan trap em joins N:N via primary_key: title_key.",
+        blocks: [
+          { title: "Métricas Expostas", items: ["<code>count_imdb_top_1000</code> (<code>sum</code> de <code>is_imdb_top_1000</code>)", "<code>avg_imdb_rating</code> (<code>avg</code> de <code>imdb_rating</code>)", "<code>avg_rating</code>, <code>count</code>, <code>sum_votes</code>"] },
+          { title: "APIs", items: ["REST API: <code>:4000</code> (usada pelo MCP)", "SQL API (Postgres wire): <code>:15432</code> (usada pelo Superset)"] }
+        ]
+      },
+      "superset": {
+        layer: "5. Consumo BI",
+        title: "Apache Superset 6.1",
+        desc: "Dashboard 'Camada semântica — títulos' provisionado via código (bootstrap_semantic_layer.py) em grid 2x2.",
+        blocks: [
+          { title: "Gráficos", items: ["<code>Top 10 Gêneros no IMDB Top 1000</code> (barras horizontais)", "<code>Nota IMDB vs. Crítica por Gênero</code> (barras agrupadas 0–10)", "<code>Nota média por país</code> e <code>Medidas por tipo de título</code>"] },
+          { title: "Acesso", items: ["<code>http://localhost:8088</code> (<code>MEASURE(...)</code> no Cube)"] }
+        ]
+      },
+      "mcp-agent": {
+        layer: "5. Consumo IA",
+        title: "Servidor MCP (mcp/server.py)",
+        desc: "Expõe o Cube para agentes de IA com descoberta dinâmica de medidas (list_measures) e consultas governadas (query_cube).",
+        blocks: [
+          { title: "Validação", items: ["<code>unittest</code>: <code>Ran 9 tests ... OK</code>", "<code>demo.py</code>: <code>Dramas — 89 títulos no IMDB Top 1000 (nota IMDB 7.952 vs. crítica 6.773)</code>"] }
+        ]
+      }
+    };
+
+    const nodes = document.querySelectorAll("[data-id]");
+    const layers = document.querySelectorAll(".layer, .orch-banner");
+    const filterBtns = document.querySelectorAll(".filter-btn");
+    const searchInput = document.getElementById("search");
+
+    function selectNode(id) {
+      nodes.forEach(n => n.classList.toggle("selected", n.dataset.id === id));
+      const d = DETAILS[id];
+      if (!d) return;
+      document.getElementById("ins-layer").textContent = d.layer;
+      document.getElementById("ins-title").textContent = d.title;
+      document.getElementById("ins-desc").textContent = d.desc;
+      const ins = document.getElementById("inspector");
+      ins.querySelectorAll(".detail-block").forEach(el => el.remove());
+      d.blocks.forEach(b => {
+        const div = document.createElement("div");
+        div.className = "detail-block";
+        div.innerHTML = `<h3>${b.title}</h3><ul>${b.items.map(i => `<li>${i}</li>`).join("")}</ul>`;
+        ins.appendChild(div);
+      });
+    }
+
+    nodes.forEach(n => n.addEventListener("click", () => selectNode(n.dataset.id)));
+
+    filterBtns.forEach(btn => {
+      btn.addEventListener("click", () => {
+        filterBtns.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        const f = btn.dataset.filter;
+        layers.forEach(l => {
+          if (f === "all") l.classList.remove("dimmed");
+          else l.classList.toggle("dimmed", l.dataset.layer !== f);
+        });
+      });
+    });
+
+    searchInput.addEventListener("input", e => {
+      const q = e.target.value.trim().toLowerCase();
+      document.querySelectorAll(".node").forEach(node => {
+        const text = (node.innerText + " " + JSON.stringify(DETAILS[node.dataset.id] || {})).toLowerCase();
+        node.classList.toggle("hidden-search", q !== "" && !text.includes(q));
+      });
+    });
+  </script>
+</body>
+</html>

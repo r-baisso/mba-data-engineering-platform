@@ -19,6 +19,56 @@ Na plataforma original (`toy-data-platform`), o dataset `imdb_top_1000.csv` já 
 
 A plataforma foi evoluída de forma incremental (em ciclo *Spec-Driven Development*, documentado em `docs/specs/`) cobrindo transformação/modelagem, qualidade, orquestração, camada semântica e consumo.
 
+### Arquitetura da Solução
+![Arquitetura da Solução Lakehouse](./evidencias/arquitetura-solucao.png)
+
+> **Versão interativa e responsiva (HTML):** [`docs/arquitetura-solucao.html`](./arquitetura-solucao.html) (permite filtrar camadas, buscar tabelas/métricas e inspecionar cada componente no navegador).
+
+<details>
+<summary>Ver diagrama em Mermaid (renderização nativa no GitHub)</summary>
+
+```mermaid
+flowchart TB
+    subgraph SRC["1. Fontes (CSV)"]
+        direction LR
+        N["netflix_titles.csv"]
+        M["meta_critic.csv"]
+        I["imdb_top_1000.csv"]
+    end
+
+    subgraph ING["2. Ingestao & Orquestracao"]
+        direction LR
+        AF["Airflow 3 — DAG extract_movies\n(max_active_tasks=2)"]
+        DLT["dlt filesystem_pipeline.py\n(write_disposition=replace)"]
+        AF -->|DockerOperator paralelo| DLT
+    end
+
+    subgraph LH["3. Lakehouse (MinIO + Lakekeeper / Apache Iceberg)"]
+        direction LR
+        RAW["raw.raw_movies.*"]
+        TRU["trusted.movies.*\n(+ imdb_top_1000: 1.000)"]
+        REF["refined.ml.fct_titles (1.813)\ndim_* & bridge_title_genre"]
+        RAW -->|dbt + Trino 471| TRU
+        TRU -->|Star Schema + 52 testes PASS| REF
+    end
+
+    subgraph SEM["4. Camada Semantica & Consumo"]
+        direction LR
+        CUBE["Cube v1.8.6 — titles_overview\ncount_imdb_top_1000 | avg_imdb_rating | avg_rating"]
+        SUP["Apache Superset 6.1\nDashboard 2x2 (:8088)"]
+        MCP["Agente MCP\nserver.py + demo.py (9/9 OK)"]
+        CUBE -->|SQL API :15432| SUP
+        CUBE -->|REST API :4000| MCP
+    end
+
+    SRC --> DLT
+    DLT --> RAW
+    AF -->|transform-dbt-build| TRU
+    REF -->|Trino SQL| CUBE
+```
+
+</details>
+
 ---
 
 ## 2. Como foi feito
